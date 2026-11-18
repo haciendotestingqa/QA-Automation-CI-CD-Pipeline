@@ -1,0 +1,46 @@
+{
+  "name": "qa-automation-ci-cd-pipeline",
+  "version": "1.0.0",
+  "description": "QA Automation & CI-CD Pipeline: Web (Playwright), API, Mobile (Maestro), Performance (k6), and Pact Broker multi-consumer",
+  "private": true,
+  "scripts": {
+    "provider:start": "node provider/server.mjs",
+    "test:web": "playwright test --project=web",
+    "test:api": "playwright test --project=api",
+    "test:e2e": "playwright test --project=web --project=api",
+    "test:perf": "k6 run tests/performance/stress-test.js",
+    "test:contract:consumers": "vitest run",
+    "test:contract:provider": "tsx tests/contract/provider.verify.ts",
+    "test:contract": "npm run test:contract:consumers && npm run test:contract:provider",
+    "test:contract:publish": "node tests/contract/publish-pacts.mjs",
+    "test:contract:broker": "npm run test:contract:consumers && npm run test:contract:publish && PACT_BROKER_BASE_URL=${PACT_BROKER_BASE_URL:-http://127.0.0.1:9292} npm run test:contract:provider",
+    "broker:up": "docker compose -f docker-compose.pact-broker.yml up -d",
+    "broker:down": "docker compose -f docker-compose.pact-broker.yml down",
+    "report": "playwright show-report"
+  },
+  "keywords": [
+    "playwright",
+    "maestro",
+    "k6",
+    "pact",
+    "pact-broker",
+    "qa-automation",
+    "ci-cd",
+    "e2e",
+    "api-testing",
+    "performance"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@pact-foundation/pact": "^13.2.0",
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,44 @@
+# Android flow for Maestro's official sample app (Wikipedia)
+# Requires: samples/sample.apk installed on an active emulator/device
+#
+# Local:
+#   adb install -r samples/sample.apk
+#   maestro test tests/mobile/android-flow.yaml
+#
+appId: org.wikipedia
+---
+- launchApp:
+    clearState: true
+# Official sample onboarding pattern (Forward x3 + Skip)
+- tapOn:
+    text: "Non existent view"
+    optional: true
+- tapOn: "Forward"
+- tapOn: "Forward"
+- tapOn: "Forward"
+- tapOn: "Skip"
+- tapOn: "Search"
+# Dismiss search-widget promo without leaving the search screen
+- runFlow:
+    when:
+      visible: "A Faster way to Search"
+    commands:
+      - tapOn:
+          text: "Close"
+          optional: true
+      - tapOn:
+          id: "org.wikipedia:id/touch_outside"
+          optional: true
+# If dismiss sent us back home, open Search again
+- runFlow:
+    when:
+      notVisible: "Search Wikipedia"
+    commands:
+      - tapOn: "Search"
+- extendedWaitUntil:
+    visible: "Search Wikipedia"
+    timeout: 20000
+- tapOn: "Search Wikipedia"
+- inputText: "Playwright"
+- pressKey: Enter
+- assertVisible: "Playwright"

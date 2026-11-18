@@ -1,0 +1,30 @@
+# Local Pact Broker for the multi-consumer lab.
+# Usage:
+#   docker compose -f docker-compose.pact-broker.yml up -d
+#   open http://127.0.0.1:9292
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: pact
+      POSTGRES_PASSWORD: pact
+      POSTGRES_DB: pact_broker
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pact -d pact_broker']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pact-broker:
+    image: pactfoundation/pact-broker:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PACT_BROKER_DATABASE_URL: postgres://pact:pact@postgres:5432/pact_broker
+      PACT_BROKER_DATABASE_CONNECT_MAX_RETRIES: '10'
+      PACT_BROKER_PORT: '9292'
+      # Lab only — do not use in production
+      PACT_BROKER_ALLOW_PUBLIC_READ: 'true'
+    ports:
+      - '9292:9292'

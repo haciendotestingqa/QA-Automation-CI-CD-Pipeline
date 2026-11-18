@@ -1,0 +1,326 @@
+name: QA Automation & CI-CD Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # 03:00 local (UTC-4) → 07:00 UTC — TEMP lab: keep only for a couple of days
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: qa-lab-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # EDUCATIONAL ONLY (commented) — how a real "app build" artifact would look
+  # This lab does NOT run a product build; we start provider:start / sample.apk instead.
+  # In a real project you would UNCOMMENT jobs like these and wire needs/download.
+  # ===========================================================================
+  # build-web:
+  #   name: Build web/API app
+  #   if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Build (example)
+  #       run: npm ci && npm run build
+  #     - name: Upload web build artifact (FIXED name agreed with Dev/QA)
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: app-build-web       # ← fixed name (not the PR title)
+  #         path: dist/
+  #         retention-days: 7
+  #
+  # build-mobile:
+  #   name: Build Android app (APK)
+  #   if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Set up JDK
+  #       uses: actions/setup-java@v4
+  #       with:
+  #         distribution: temurin
+  #         java-version: '17'
+  #     - name: Build debug APK (example)
+  #       run: ./gradlew assembleDebug
+  #       # or: cd android && ./gradlew assembleDebug
+  #     - name: Upload mobile build artifact (FIXED name agreed with Dev/QA)
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: app-build-mobile    # ← fixed name for the APK
+  #         path: app/build/outputs/apk/debug/*.apk
+  #         retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Web E2E + API (Playwright) — push / pull_request / manual
+  # ---------------------------------------------------------------------------
+  e2e-and-api-tests:
+    name: E2E Web & API
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    # needs: build-web             # ← EDUCATIONAL: wait for build-web job above
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # EDUCATIONAL: download the web build BEFORE tests (instead of provider:start)
+      # - name: Download web app build artifact
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: app-build-web
+      #     path: ./app-build
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      # Lab today: start mini catalog API here.
+      # Real project: start/serve the downloaded app-build (or set BASE_URL to staging).
+      - name: Start lab catalog provider
+        run: |
+          npm run provider:start &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4010/health >/dev/null; then
+              echo "Provider is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Provider failed to start"
+          exit 1
+
+      - name: Run Web + API tests
+        run: npm run test:e2e
+        env:
+          CI: true
+          PROVIDER_BASE_URL: http://127.0.0.1:4010
+          # BASE_URL: http://127.0.0.1:3000   # ← EDUCATIONAL: URL of app from app-build
+
+      # These uploads are TEST REPORTS (QA output), not the app build.
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload Playwright test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Contracts (Pact multi-consumer + Broker) — push / pull_request / manual
+  # ---------------------------------------------------------------------------
+  contract-tests:
+    name: Pact Broker (multi-consumer)
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Start Pact Broker
+        run: |
+          docker compose -f docker-compose.pact-broker.yml up -d
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:9292 >/dev/null; then
+              echo "Pact Broker is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f docker-compose.pact-broker.yml logs
+          exit 1
+
+      - name: Start lab catalog provider
+        run: |
+          npm run provider:start &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4010/health >/dev/null; then
+              echo "Provider is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
+
+      - name: Generate consumer pacts (web-shop + mobile-shop)
+        run: npm run test:contract:consumers
+
+      - name: Publish pacts to Broker
+        run: npm run test:contract:publish
+        env:
+          PACT_BROKER_BASE_URL: http://127.0.0.1:9292
+          GITHUB_SHA: ${{ github.sha }}
+
+      - name: Verify provider against Broker (multi-consumer)
+        run: npm run test:contract:provider
+        env:
+          PROVIDER_BASE_URL: http://127.0.0.1:4010
+          PACT_BROKER_BASE_URL: http://127.0.0.1:9292
+          GITHUB_SHA: ${{ github.sha }}
+
+      - name: Upload generated pacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pact-contracts
+          path: tests/contract/pacts/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Mobile Android (Maestro) — push / pull_request / manual
+  # ---------------------------------------------------------------------------
+  mobile-tests:
+    name: Mobile Android (Maestro)
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    # needs: build-mobile          # ← EDUCATIONAL: wait for build-mobile job above
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # EDUCATIONAL: download the APK from build-mobile BEFORE emulator/tests
+      # - name: Download mobile app build artifact (APK)
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: app-build-mobile
+      #     path: ./app-build
+      # # Then in the emulator script: adb install -r app-build/*.apk
+      # # and skip "maestro download-samples" (lab-only Wikipedia demo).
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      # Lab today: Wikipedia sample APK. Real project: use app-build from download-artifact above.
+      - name: Download Maestro samples (sample.apk)
+        run: maestro download-samples
+
+      # CI uses API 30 (stable boot on GitHub runners). Local manual validation: API 33.
+      - name: Run Maestro flow on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          profile: pixel_4
+          force-avd-creation: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            adb wait-for-device
+            adb shell getprop ro.build.version.sdk
+            # EDUCATIONAL (real project, after download-artifact app-build-mobile):
+            # adb install -r app-build/*.apk
+            # Lab today (Wikipedia sample):
+            adb install -r samples/sample.apk || adb install -r sample.apk
+            mkdir -p reports/maestro
+            maestro test tests/mobile/android-flow.yaml --format junit --output reports/maestro/results.xml || maestro test tests/mobile/android-flow.yaml
+
+      # This upload is a TEST REPORT (QA output), not the app build APK.
+      - name: Upload Maestro reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-report
+          path: reports/maestro/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Performance (k6) — schedule 03:00 UTC-4 + manual (TEMP: through ~2026-11-20)
+  # ---------------------------------------------------------------------------
+  performance-scheduled-tests:
+    name: Performance (k6)
+    if: >
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      && (github.event_name != 'schedule' || github.event.schedule == '0 7 * * *')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check temporary cron window
+        id: window
+        run: |
+          # Educational window through 2026-11-20 UTC; after that, scheduled runs no-op green
+          if [[ "${{ github.event_name }}" != "schedule" ]]; then
+            echo "active=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TODAY=$(date -u +%Y-%m-%d)
+          if [[ "$TODAY" > "2026-11-20" ]]; then
+            echo "Temporary k6 cron lab ended ($TODAY > 2026-11-20)."
+            echo "active=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Within temporary k6 cron window ($TODAY <= 2026-11-20)."
+            echo "active=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.window.outputs.active == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup k6
+        if: steps.window.outputs.active == 'true'
+        uses: grafana/setup-k6-action@v1
+
+      - name: Run stress test
+        if: steps.window.outputs.active == 'true'
+        run: |
+          mkdir -p reports/k6
+          k6 run tests/performance/stress-test.js \
+            --summary-export=reports/k6/summary.json
+
+      - name: Upload k6 summary
+        if: always() && steps.window.outputs.active == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-performance-report
+          path: reports/k6/
+          retention-days: 30
+          if-no-files-found: ignore
