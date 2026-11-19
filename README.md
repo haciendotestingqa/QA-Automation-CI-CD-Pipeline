@@ -94,6 +94,8 @@ npm run test:contract
 
 GitHub Actions runs:
 
+### Continuous Integration (quality gates)
+
 - **e2e-and-api-tests** — Playwright Web + local catalog API
 - **contract-tests** — Pact multi-consumer + Broker publish/verify
 - **mobile-tests** — Maestro on Android emulator (**API 30** in CI for stable boot; local manual often API 33)
@@ -101,6 +103,32 @@ GitHub Actions runs:
   Temporary lab window through **2026-11-20**; local anytime with `npm run test:perf`
 
 Reports are published as workflow **Artifacts**.
+
+### Continuous Delivery (publish image)
+
+On **push to `main`**, after the CI jobs above succeed, **deliver-catalog-image** builds the lab catalog API (`provider/`) and pushes it to **GHCR**:
+
+`ghcr.io/<owner>/qa-automation-ci-cd-pipeline/catalog-api:latest`  
+(also tagged with `sha-<commit>`)
+
+In a real team this packaging/publish step is usually **Dev / DevOps**; QA owns the gates that must stay green before publish.
+
+**Try the image locally** (after the CD job has run at least once, and the package is public or you are logged in):
+
+```bash
+# Build locally (no GHCR needed)
+docker build -t catalog-api .
+docker run --rm -p 4010:4010 catalog-api
+curl -s http://127.0.0.1:4010/health
+```
+
+```bash
+# Pull from GHCR (replace owner if needed)
+docker pull ghcr.io/haciendotestingqa/qa-automation-ci-cd-pipeline/catalog-api:latest
+docker run --rm -p 4010:4010 ghcr.io/haciendotestingqa/qa-automation-ci-cd-pipeline/catalog-api:latest
+```
+
+If `docker pull` fails with 403 on a public repo, open the package on GitHub → **Package settings** → set visibility to **Public**.
 
 ## License
 

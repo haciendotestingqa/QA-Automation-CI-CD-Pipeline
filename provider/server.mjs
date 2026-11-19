@@ -5,6 +5,8 @@ import http from 'node:http';
  * Serves a stable catalog so CI does not depend on Fake Store / Cloudflare.
  */
 const PORT = Number(process.env.PROVIDER_PORT || 4010);
+// Local default: loopback only. Docker/CD sets PROVIDER_HOST=0.0.0.0 so the container accepts traffic.
+const HOST = process.env.PROVIDER_HOST || '127.0.0.1';
 
 const products = [
   {
@@ -44,6 +46,6 @@ const server = http.createServer((req, res) => {
   res.end(JSON.stringify({ error: 'not found' }));
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Lab provider listening on http://127.0.0.1:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Lab provider listening on http://${HOST}:${PORT}`);
 });
