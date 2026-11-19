@@ -1,16 +1,75 @@
 # QA Automation & CI-CD Pipeline
 
-Professional automated testing lab covering the full quality ecosystem:
+[![CI](https://github.com/haciendotestingqa/QA-Automation-CI-CD-Pipeline/actions/workflows/qa-lab.yml/badge.svg)](https://github.com/haciendotestingqa/QA-Automation-CI-CD-Pipeline/actions/workflows/qa-lab.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen)](https://nodejs.org/)
+[![Playwright](https://img.shields.io/badge/Playwright-E2E%2FAPI-2EAD33)](https://playwright.dev)
+[![Maestro](https://img.shields.io/badge/Maestro-Mobile-5C2D91)](https://maestro.mobile.dev)
+[![Pact](https://img.shields.io/badge/Pact-Contracts-40AF91)](https://docs.pact.io)
+[![k6](https://img.shields.io/badge/k6-Performance-7D64FF)](https://k6.io)
 
-| Layer | Tool | Location |
-|------|-------------|-----------|
-| Web E2E | [Playwright](https://playwright.dev) | `tests/web/` |
-| API | Playwright (`request`) + local catalog provider | `tests/api/` + `provider/` |
-| Mobile Android | [Maestro](https://maestro.mobile.dev) | `tests/mobile/` |
-| Load / Stress | [k6](https://k6.io) | `tests/performance/` |
-| Contracts | [Pact](https://docs.pact.io) + Broker (multi-consumer) | `tests/contract/` |
+End-to-end lab that shows how a quality team can **automate tests, protect `main`, notify the team, and deliver an artifact** when quality gates are green.
 
-The unified pipeline lives in [`.github/workflows/qa-lab.yml`](.github/workflows/qa-lab.yml).
+**Built by** [@haciendotestingqa](https://github.com/haciendotestingqa)
+
+**CI evidence:** [Actions](https://github.com/haciendotestingqa/QA-Automation-CI-CD-Pipeline/actions) · [example green run](https://github.com/haciendotestingqa/QA-Automation-CI-CD-Pipeline/actions/runs/44551781689)
+
+## Table of contents
+
+- [Overview](#overview)
+- [Evidence](#evidence--slack--sticky-pr-comment)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Project layout](#project-layout)
+- [CI/CD](#cicd)
+- [License](#license)
+
+## Overview
+
+| Layer | Tool | What it validates |
+|------|------|-------------------|
+| Web E2E + API | [Playwright](https://playwright.dev) | Functional / API regression against a local catalog provider |
+| Mobile | [Maestro](https://maestro.mobile.dev) (Android) | Emulator user journey |
+| Contracts | [Pact](https://docs.pact.io) + Broker (multi-consumer) | Web + mobile clients stay compatible with the API |
+| Performance | [k6](https://k6.io) | Capacity / latency on a daily schedule (not on every push) |
+| Dependency security | `npm audit` + Dependabot | Known vulnerable / outdated dependencies |
+| Delivery (CD) | Docker → [GHCR](https://docs.github.com/en/packages) | Publishes the catalog API image only after CI gates pass on `main` |
+
+> [!NOTE]
+> Educational lab, not a production product. Packaging/CD is usually **Dev / DevOps** ownership; QA owns the **quality gates** and the signal (Slack / PR / artifacts).
+
+**Notifications**
+
+- **Slack** (Incoming Webhook): after Security, E2E, Pact, and Mobile finish, **Notify** posts a channel summary + Actions link
+- **Sticky PR comment**: the same summary updates on the pull request during code review
+- **Optional email** on k6 success (Gmail secrets) — GitHub does not email green checks by itself
+- Secret **names** only in docs (e.g. `SLACK_WEBHOOK_URL`); values live in GitHub Actions secrets
+
+**Pipeline flow**
+
+```text
+Push / PR → CI (security, web/API, Pact, mobile)
+                ↓
+         Notify → Slack (+ sticky PR comment)
+                ↓
+     Push to main + green gates → CD → image on GHCR
+                ↓
+     Daily cron (~03:17 Venezuela) → k6 → optional success email / Slack
+```
+
+**Takeaways:** CI ≠ CD · each layer answers a different question · Artifacts are the evidence · Slack closes the loop in-channel.
+
+*One-liner:* an omnichannel QA pipeline with CI gates, GHCR delivery, dependency security, and Slack (plus optional performance email) so the team knows in near real time whether the build is ready to move forward.
+
+## Evidence — Slack & sticky PR comment
+
+Slack channel summary from **QA Lab CI**:
+
+![Slack notifications from QA Lab CI](docs/images/slack-notify.png)
+
+Sticky **QA Lab summary** on Dependabot PR [#10](https://github.com/haciendotestingqa/QA-Automation-CI-CD-Pipeline/pull/10):
+
+![Sticky QA Lab summary comment on a pull request](docs/images/pr-sticky-comment.png)
 
 ## Requirements
 
@@ -18,13 +77,13 @@ The unified pipeline lives in [`.github/workflows/qa-lab.yml`](.github/workflows
 - **Playwright** browsers (`npx playwright install`)
 - **Maestro CLI** + Android emulator/device (for mobile)
 - **k6** (for performance)
-- **Docker** (optional, for Pact Broker locally)
+- **Docker** (optional, for Pact Broker locally / image smoke tests)
 
-## Quick install
+## Quick start
 
 ```bash
 npm install
-npx playwright install
+npx playwright install chromium
 ```
 
 Maestro (Linux/macOS):
@@ -34,29 +93,31 @@ curl -Ls "https://get.maestro.mobile.dev" | bash
 maestro download-samples
 ```
 
-## npm scripts
+### npm scripts
 
 | Script | Description |
 |--------|-------------|
 | `npm run provider:start` | Start local catalog API (`:4010`) |
-| `npm run test:web` | Web E2E tests |
+| `npm run test:web` | Web E2E |
 | `npm run test:api` | API tests (needs provider) |
 | `npm run test:e2e` | Web + API |
-| `npm run test:perf` | Stress test with k6 |
+| `npm run test:perf` | k6 stress test |
 | `npm run test:contract` | Pact consumers + provider (file-based) |
 | `npm run test:contract:broker` | Consumers → publish → verify via Broker |
-| `npm run broker:up` / `broker:down` | Local Pact Broker on `:9292` (needs Docker running) |
-| `npm run report` | Open the Playwright HTML report |
+| `npm run broker:up` / `broker:down` | Local Pact Broker on `:9292` |
+| `npm run report` | Open Playwright HTML report |
 
-### Manual local runs (outside the pipeline)
+> [!TIP]
+> Start the catalog provider before API or Pact runs: `npm run provider:start` (other terminal), then `npm run test:e2e` or `npm run test:contract:broker`.
+
+### Manual local runs
 
 **Catalog API** (same mini-backend CI uses):
 
 ```bash
 npm run provider:start
-# browser or curl:
-#   http://127.0.0.1:4010/health
-#   http://127.0.0.1:4010/api/products
+# http://127.0.0.1:4010/health
+# http://127.0.0.1:4010/api/products
 npm run test:api
 ```
 
@@ -72,87 +133,96 @@ npm run test:web
 maestro test tests/mobile/android-flow.yaml
 ```
 
-**Pact Broker UI** only appears after Docker is up:
+**Pact with Broker** (Docker must be running):
 
 ```bash
-# start Docker Desktop / daemon first, then:
-npm run broker:up
-# open http://127.0.0.1:9292
-npm run provider:start   # other terminal
+npm run broker:up                 # http://127.0.0.1:9292
+npm run provider:start            # other terminal
 npm run test:contract:broker
-npm run broker:down      # when finished
+npm run broker:down
 ```
 
-Without Broker (still multi-consumer, file-based):
+Without Broker (multi-consumer, file-based):
 
 ```bash
 npm run provider:start
 npm run test:contract
 ```
 
+## Project layout
+
+| Path | Role |
+|------|------|
+| `tests/web/` | Playwright web E2E |
+| `tests/api/` | Playwright API tests |
+| `provider/` | Local catalog API (also Docker/CD image) |
+| `tests/mobile/` | Maestro Android flow |
+| `tests/performance/` | k6 stress script |
+| `tests/contract/` | Pact multi-consumer + publish/verify |
+| `docs/images/` | Portfolio evidence screenshots |
+| `.github/workflows/qa-lab.yml` | Unified CI/CD workflow |
+| `.github/dependabot.yml` | Weekly npm + Actions update PRs |
+
 ## CI/CD
 
-GitHub Actions runs:
+Unified workflow: [`.github/workflows/qa-lab.yml`](.github/workflows/qa-lab.yml).
 
 ### Continuous Integration (quality gates)
 
-- **security-audit** — `npm audit` (high+), soft gate + artifact `security-npm-audit`; weekly **Dependabot** PRs (`.github/dependabot.yml`)
-- **e2e-and-api-tests** — Playwright Web + local catalog API
-- **contract-tests** — Pact multi-consumer + Broker publish/verify
-- **mobile-tests** — Maestro on Android emulator (**API 30** in CI for stable boot; local manual often API 33)
-- **performance-scheduled-tests** — k6 daily at **~03:17 Venezuela** (`17 7 * * *` UTC) and manual  
-  Local anytime: `npm run test:perf`  
-  Optional **success email** + Slack when secrets are set (GitHub does **not** email greens by itself)
-- **notify** — sticky **PR comment** with job results; optional **Slack** if secret `SLACK_WEBHOOK_URL` is set
+| Job | What it does |
+|-----|----------------|
+| `security-audit` | `npm audit` (high+), soft gate + artifact `security-npm-audit`; Dependabot PRs weekly |
+| `e2e-and-api-tests` | Playwright Web + local catalog API |
+| `contract-tests` | Pact multi-consumer + Broker publish/verify |
+| `mobile-tests` | Maestro on Android emulator (**API 30** in CI; local often API 33) |
+| `performance-scheduled-tests` | k6 daily ~**03:17 Venezuela** (`17 7 * * *` UTC) + manual |
+| `notify` | Sticky PR comment + optional Slack (`SLACK_WEBHOOK_URL`) |
 
-Reports are published as workflow **Artifacts**.
+Reports upload as workflow **Artifacts** (`playwright-report`, `pact-contracts`, `maestro-report`, `k6-performance-report`, `security-npm-audit`).
+
+> [!WARNING]
+> Security is a **soft gate** today (report + Dependabot). GitHub Actions **cron can delay or skip**. Do not require the k6 job as a branch-protection check — it does not run on every PR.
 
 #### Optional Slack setup
 
-1. Slack → create an **Incoming Webhook** for a channel  
-2. Repo → **Settings → Secrets and variables → Actions** → New secret  
-3. Name: `SLACK_WEBHOOK_URL` · Value: the webhook URL  
+1. Slack → Incoming Webhook for a channel  
+2. Repo → **Settings → Secrets and variables → Actions → New repository secret**  
+3. Name: `SLACK_WEBHOOK_URL` · Value: webhook URL  
 
-Without the secret, the notify job still posts on PRs and skips Slack cleanly.
+Without the secret, Notify still comments on PRs and skips Slack cleanly.
 
 #### Optional email on k6 success (Gmail)
 
-GitHub **will not** email you when a run is green. This lab sends mail only if you add secrets:
-
 | Secret | Value |
 |--------|--------|
-| `MAIL_TO` | Your inbox (e.g. `tu@gmail.com`) |
-| `MAIL_USERNAME` | Same Gmail address (SMTP user) |
-| `MAIL_APP_PASSWORD` | [Gmail App Password](https://myaccount.google.com/apppasswords) (not your normal password) |
-
-Same place: **Settings → Secrets and variables → Actions → New repository secret**.
+| `MAIL_TO` | Your inbox |
+| `MAIL_USERNAME` | Gmail address (SMTP user) |
+| `MAIL_APP_PASSWORD` | [Gmail App Password](https://myaccount.google.com/apppasswords) |
 
 ### Continuous Delivery (publish image)
 
-On **push to `main`**, after the CI jobs above succeed, **deliver-catalog-image** builds the lab catalog API (`provider/`) and pushes it to **GHCR**:
+On **push to `main`**, after E2E + Pact + Mobile succeed, `deliver-catalog-image` builds `provider/` and pushes to GHCR:
 
-`ghcr.io/<owner>/qa-automation-ci-cd-pipeline/catalog-api:latest`  
-(also tagged with `sha-<commit>`)
+`ghcr.io/haciendotestingqa/qa-automation-ci-cd-pipeline/catalog-api:latest`  
+(also tagged `sha-<commit>`)
 
-In a real team this packaging/publish step is usually **Dev / DevOps**; QA owns the gates that must stay green before publish.
+CD is **skipped** on `workflow_dispatch`, PRs, and schedule (by design).
 
-**Try the image locally** (after the CD job has run at least once, and the package is public or you are logged in):
+**Try the image:**
 
 ```bash
-# Build locally (no GHCR needed)
 docker build -t catalog-api .
 docker run --rm -p 4010:4010 catalog-api
 curl -s http://127.0.0.1:4010/health
 ```
 
 ```bash
-# Pull from GHCR (replace owner if needed)
 docker pull ghcr.io/haciendotestingqa/qa-automation-ci-cd-pipeline/catalog-api:latest
 docker run --rm -p 4010:4010 ghcr.io/haciendotestingqa/qa-automation-ci-cd-pipeline/catalog-api:latest
 ```
 
-If `docker pull` fails with 403 on a public repo, open the package on GitHub → **Package settings** → set visibility to **Public**.
+If `docker pull` returns 403, set the package visibility to **Public** in GitHub Packages settings.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
