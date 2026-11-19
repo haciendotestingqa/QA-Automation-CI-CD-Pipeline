@@ -100,8 +100,9 @@ GitHub Actions runs:
 - **e2e-and-api-tests** — Playwright Web + local catalog API
 - **contract-tests** — Pact multi-consumer + Broker publish/verify
 - **mobile-tests** — Maestro on Android emulator (**API 30** in CI for stable boot; local manual often API 33)
-- **performance-scheduled-tests** — k6 on cron `0 7 * * *` (03:00 UTC-4) and manual  
-  Temporary lab window through **2026-11-20**; local anytime with `npm run test:perf`
+- **performance-scheduled-tests** — k6 daily at **~03:17 Venezuela** (`17 7 * * *` UTC) and manual  
+  Local anytime: `npm run test:perf`  
+  Optional **success email** + Slack when secrets are set (GitHub does **not** email greens by itself)
 - **notify** — sticky **PR comment** with job results; optional **Slack** if secret `SLACK_WEBHOOK_URL` is set
 
 Reports are published as workflow **Artifacts**.
@@ -113,6 +114,18 @@ Reports are published as workflow **Artifacts**.
 3. Name: `SLACK_WEBHOOK_URL` · Value: the webhook URL  
 
 Without the secret, the notify job still posts on PRs and skips Slack cleanly.
+
+#### Optional email on k6 success (Gmail)
+
+GitHub **will not** email you when a run is green. This lab sends mail only if you add secrets:
+
+| Secret | Value |
+|--------|--------|
+| `MAIL_TO` | Your inbox (e.g. `tu@gmail.com`) |
+| `MAIL_USERNAME` | Same Gmail address (SMTP user) |
+| `MAIL_APP_PASSWORD` | [Gmail App Password](https://myaccount.google.com/apppasswords) (not your normal password) |
+
+Same place: **Settings → Secrets and variables → Actions → New repository secret**.
 
 ### Continuous Delivery (publish image)
 

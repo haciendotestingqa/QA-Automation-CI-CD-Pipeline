@@ -6,8 +6,8 @@ on:
   pull_request:
     branches: [main, master]
   schedule:
-    # 03:00 local (UTC-4) → 07:00 UTC — TEMP lab: keep only for a couple of days
-    - cron: '0 7 * * *'
+    # ~03:17 Venezuela (UTC-4) → 07:17 UTC (minute != :00 avoids GitHub peak delays)
+    - cron: '17 7 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -326,57 +326,93 @@ jobs:
           if-no-files-found: ignore
 
   # ---------------------------------------------------------------------------
-  # Performance (k6) — schedule 03:00 UTC-4 + manual (TEMP: through ~2026-11-20)
+  # Performance (k6) — daily schedule (~03:17 Venezuela) + manual
+  # GitHub does NOT email on green by default → optional SMTP success mail below.
   # ---------------------------------------------------------------------------
   performance-scheduled-tests:
     name: Performance (k6)
-    if: >
-      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-      && (github.event_name != 'schedule' || github.event.schedule == '0 7 * * *')
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
-      - name: Check temporary cron window
-        id: window
-        run: |
-          # Educational window through 2026-11-20 UTC; after that, scheduled runs no-op green
-          if [[ "${{ github.event_name }}" != "schedule" ]]; then
-            echo "active=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          TODAY=$(date -u +%Y-%m-%d)
-          if [[ "$TODAY" > "2026-11-20" ]]; then
-            echo "Temporary k6 cron lab ended ($TODAY > 2026-11-20)."
-            echo "active=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Within temporary k6 cron window ($TODAY <= 2026-11-20)."
-            echo "active=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout
-        if: steps.window.outputs.active == 'true'
         uses: actions/checkout@v4
 
       - name: Setup k6
-        if: steps.window.outputs.active == 'true'
         uses: grafana/setup-k6-action@v1
 
       - name: Run stress test
-        if: steps.window.outputs.active == 'true'
+        id: k6
         run: |
           mkdir -p reports/k6
           k6 run tests/performance/stress-test.js \
             --summary-export=reports/k6/summary.json
 
       - name: Upload k6 summary
-        if: always() && steps.window.outputs.active == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: k6-performance-report
           path: reports/k6/
           retention-days: 30
           if-no-files-found: ignore
+
+      # Optional: set repo secrets MAIL_TO, MAIL_USERNAME, MAIL_APP_PASSWORD (Gmail app password)
+      - name: Email on k6 success
+        if: success()
+        continue-on-error: true
+        env:
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$MAIL_TO" ] || [ -z "$MAIL_USERNAME" ] || [ -z "$MAIL_APP_PASSWORD" ]; then
+            echo "Mail secrets not configured — skipping success email."
+            echo "Add: MAIL_TO, MAIL_USERNAME, MAIL_APP_PASSWORD (Gmail → App password)."
+            exit 0
+          fi
+          python3 <<'PY'
+          import os, smtplib
+          from email.message import EmailMessage
+
+          to_addr = os.environ["MAIL_TO"]
+          user = os.environ["MAIL_USERNAME"]
+          password = os.environ["MAIL_APP_PASSWORD"]
+          run_url = os.environ["RUN_URL"]
+          repo = os.environ["REPO"]
+
+          msg = EmailMessage()
+          msg["Subject"] = f"QA Lab k6 PASS — {repo}"
+          msg["From"] = user
+          msg["To"] = to_addr
+          msg.set_content(
+              "Performance (k6) completed successfully.\n\n"
+              f"Repository: {repo}\n"
+              f"Run: {run_url}\n"
+          )
+
+          with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+              smtp.login(user, password)
+              smtp.send_message(msg)
+          print(f"Success email sent to {to_addr}")
+          PY
+
+      - name: Slack on k6 success (optional)
+        if: success()
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "No SLACK_WEBHOOK_URL — skip Slack."
+            exit 0
+          fi
+          payload=$(jq -n --arg text "✅ QA Lab k6 PASS — ${{ github.repository }}\n${RUN_URL}" '{text: $text}')
+          curl -sS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
 
   # ---------------------------------------------------------------------------
   # CD — Publish catalog API image to GHCR (after CI gates on main)
