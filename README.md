@@ -96,13 +96,23 @@ GitHub Actions runs:
 
 ### Continuous Integration (quality gates)
 
+- **security-audit** — `npm audit` (high+), soft gate + artifact `security-npm-audit`; weekly **Dependabot** PRs (`.github/dependabot.yml`)
 - **e2e-and-api-tests** — Playwright Web + local catalog API
 - **contract-tests** — Pact multi-consumer + Broker publish/verify
 - **mobile-tests** — Maestro on Android emulator (**API 30** in CI for stable boot; local manual often API 33)
 - **performance-scheduled-tests** — k6 on cron `0 7 * * *` (03:00 UTC-4) and manual  
   Temporary lab window through **2026-11-20**; local anytime with `npm run test:perf`
+- **notify** — sticky **PR comment** with job results; optional **Slack** if secret `SLACK_WEBHOOK_URL` is set
 
 Reports are published as workflow **Artifacts**.
+
+#### Optional Slack setup
+
+1. Slack → create an **Incoming Webhook** for a channel  
+2. Repo → **Settings → Secrets and variables → Actions** → New secret  
+3. Name: `SLACK_WEBHOOK_URL` · Value: the webhook URL  
+
+Without the secret, the notify job still posts on PRs and skips Slack cleanly.
 
 ### Continuous Delivery (publish image)
 

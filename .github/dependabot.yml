@@ -1,0 +1,21 @@
+# Security / maintenance: Dependabot opens PRs when deps or Actions get updates.
+# Enable under GitHub → Settings → Code security → Dependabot (usually on by default for public repos).
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - security
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions

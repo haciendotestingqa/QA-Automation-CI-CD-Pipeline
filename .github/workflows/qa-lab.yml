@@ -15,6 +15,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Security — dependency audit (report) + Dependabot PRs (see .github/dependabot.yml)
+  # Soft gate for now: findings are uploaded + shown in PR/Slack; CD is not blocked
+  # until major bumps (vitest/pact) are validated. Industry often hard-fails on high/crit.
+  # ---------------------------------------------------------------------------
+  security-audit:
+    name: Security (npm audit)
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: npm audit (high+)
+        id: audit
+        continue-on-error: true
+        run: |
+          mkdir -p reports/security
+          set +e
+          npm audit --audit-level=high > reports/security/npm-audit.txt 2>&1
+          code=$?
+          npm audit --json > reports/security/npm-audit.json 2>/dev/null || true
+          set -e
+          echo "audit_exit=${code}" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 0 ]; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+            echo "npm audit: no high/critical findings"
+          else
+            echo "result=findings" >> "$GITHUB_OUTPUT"
+            echo "::warning::npm audit reported high/critical issues (see artifact security-npm-audit). Soft gate — review via Dependabot."
+            head -n 80 reports/security/npm-audit.txt || true
+          fi
+          exit 0
+
+      - name: Upload npm audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-npm-audit
+          path: reports/security/
+          retention-days: 30
+          if-no-files-found: ignore
+
   # ===========================================================================
   # EDUCATIONAL ONLY (commented) — how a real "app build" artifact would look
   # This lab does NOT run a product build; we start provider:start / sample.apk instead.
@@ -379,3 +432,78 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  # ---------------------------------------------------------------------------
+  # Paso 9 industria — comentario sticky en PR + Slack opcional (webhook secret)
+  # ---------------------------------------------------------------------------
+  notify:
+    name: Notify (PR + Slack)
+    if: >
+      always() &&
+      (github.event_name == 'pull_request' ||
+       github.event_name == 'push' ||
+       github.event_name == 'workflow_dispatch')
+    needs: [security-audit, e2e-and-api-tests, contract-tests, mobile-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Build summary
+        id: summary
+        run: |
+          e2e="${{ needs.e2e-and-api-tests.result }}"
+          pact="${{ needs.contract-tests.result }}"
+          mobile="${{ needs.mobile-tests.result }}"
+          sec="${{ needs.security-audit.result }}"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          cat > qa-summary.md <<EOF
+          ## QA Lab summary
+
+          | Job | Result |
+          |-----|--------|
+          | Security (npm audit) | \`${sec}\` |
+          | E2E Web & API | \`${e2e}\` |
+          | Pact Broker (multi-consumer) | \`${pact}\` |
+          | Mobile Android (Maestro) | \`${mobile}\` |
+
+          Run: ${run_url}
+
+          _Security is a soft gate (artifact \`security-npm-audit\`). Dependabot opens weekly update PRs._
+          EOF
+
+          # Strip leading spaces from heredoc indentation
+          sed -i 's/^          //' qa-summary.md
+
+          {
+            echo "slack<<EOF"
+            echo "QA Lab — ${{ github.repository }} @ ${{ github.ref_name }}"
+            echo "Security: ${sec} | E2E: ${e2e} | Pact: ${pact} | Mobile: ${mobile}"
+            echo "${run_url}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Sticky comment on PR
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: qa-lab-summary
+          path: qa-summary.md
+          recreate: true
+
+      - name: Slack webhook (optional)
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_TEXT: ${{ steps.summary.outputs.slack }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "No SLACK_WEBHOOK_URL secret — skipping Slack notify."
+            exit 0
+          fi
+          # Incoming Webhook expects JSON { "text": "..." }
+          payload=$(jq -n --arg text "$SLACK_TEXT" '{text: $text}')
+          curl -sS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
+          echo "Slack notification sent."
