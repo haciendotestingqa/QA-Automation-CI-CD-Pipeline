@@ -61,7 +61,7 @@ jobs:
 
       - name: Upload npm audit report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: security-npm-audit
           path: reports/security/
@@ -83,7 +83,7 @@ jobs:
   #     - name: Build (example)
   #       run: npm ci && npm run build
   #     - name: Upload web build artifact (FIXED name agreed with Dev/QA)
-  #       uses: actions/upload-artifact@v4
+  #       uses: actions/upload-artifact@v7
   #       with:
   #         name: app-build-web       # ← fixed name (not the PR title)
   #         path: dist/
@@ -105,7 +105,7 @@ jobs:
   #       run: ./gradlew assembleDebug
   #       # or: cd android && ./gradlew assembleDebug
   #     - name: Upload mobile build artifact (FIXED name agreed with Dev/QA)
-  #       uses: actions/upload-artifact@v4
+  #       uses: actions/upload-artifact@v7
   #       with:
   #         name: app-build-mobile    # ← fixed name for the APK
   #         path: app/build/outputs/apk/debug/*.apk
@@ -169,7 +169,7 @@ jobs:
       # These uploads are TEST REPORTS (QA output), not the app build.
       - name: Upload Playwright HTML report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: playwright-report/
@@ -178,7 +178,7 @@ jobs:
 
       - name: Upload Playwright test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: test-results/
@@ -250,7 +250,7 @@ jobs:
 
       - name: Upload generated pacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pact-contracts
           path: tests/contract/pacts/
@@ -318,7 +318,7 @@ jobs:
       # This upload is a TEST REPORT (QA output), not the app build APK.
       - name: Upload Maestro reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: maestro-report
           path: reports/maestro/
@@ -351,7 +351,7 @@ jobs:
 
       - name: Upload k6 summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: k6-performance-report
           path: reports/k6/
